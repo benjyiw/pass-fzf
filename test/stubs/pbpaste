@@ -1,0 +1,2 @@
+#!/bin/sh
+cat "$PFZF_CLIPBOARD" 2>/dev/null

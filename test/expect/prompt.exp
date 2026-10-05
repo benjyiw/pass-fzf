@@ -1,0 +1,28 @@
+# Usage: expect prompt.exp <keys> <command...>
+# Answers the OTP prompt with <keys> ("-" = expect no prompt).
+# Exits with the command's status, or 97 unexpected prompt, 98 no prompt, 99 timeout.
+set timeout 15
+set keys [lindex $argv 0]
+spawn -noecho {*}[lrange $argv 1 end]
+
+if {$keys eq "-"} {
+    expect {
+        "(Y/n)" { exit 97 }
+        eof {}
+        timeout { exit 99 }
+    }
+} else {
+    expect {
+        "Copy OTP code? (Y/n) " {}
+        eof { exit 98 }
+        timeout { exit 99 }
+    }
+    send -- [subst -nocommands -novariables $keys]
+    expect {
+        eof {}
+        timeout { exit 99 }
+    }
+}
+
+lassign [wait] pid spawn_id os_error status
+exit $status

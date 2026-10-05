@@ -1,0 +1,5 @@
+#!/bin/sh
+# Replaces pass's clipboard-clear timer: wait for teardown, then kill the
+# parent so its clipboard restore can't fall through to the real pbcopy.
+while [ -e "$PFZF_SENTINEL" ]; do /bin/sleep 0.1; done
+kill -9 "$PPID" 2>/dev/null

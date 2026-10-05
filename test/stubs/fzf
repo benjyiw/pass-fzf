@@ -1,0 +1,6 @@
+#!/bin/sh
+# Records args and candidates, then selects $PFZF_SELECT (empty = Esc).
+printf '%s\n' "$@" > "$PFZF_FZF_ARGS"
+cat > "$PFZF_FZF_INPUT"
+[ -n "$PFZF_SELECT" ] || exit 130
+printf '%s\n' "$PFZF_SELECT"

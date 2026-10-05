@@ -1,0 +1,4 @@
+#!/bin/sh
+# Logs calls so tests can count decrypts.
+printf '%s\n' "$*" >> "$PFZF_GPG_LOG"
+exec "$PFZF_REAL_GPG" "$@"

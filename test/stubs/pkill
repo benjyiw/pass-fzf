@@ -1,0 +1,3 @@
+#!/bin/sh
+# The real pkill would cancel the user's own pending clipboard clear.
+exit 1

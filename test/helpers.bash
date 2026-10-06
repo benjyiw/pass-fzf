@@ -8,6 +8,9 @@ pfzf_setup_file() {
     export PFZF_ROOT
     export GNUPGHOME="$PFZF_ROOT/gnupg"
     export PASSWORD_STORE_DIR="$PFZF_ROOT/store"
+    # Inherited settings could point pass at the user's real keyring.
+    unset PASSWORD_STORE_GPG_OPTS PASSWORD_STORE_SIGNING_KEY PASSWORD_STORE_KEY \
+        PASSWORD_STORE_EXTENSIONS_DIR PASSWORD_STORE_UMASK
     PFZF_REAL_GPG="$(command -v gpg)"
     export PFZF_REAL_GPG
     PFZF_REAL_PASS="$(command -v pass)"
@@ -50,6 +53,8 @@ pfzf_setup() {
     export PFZF_GPG_LOG="$BATS_TEST_TMPDIR/gpg.log"
     export PFZF_FZF_ARGS="$BATS_TEST_TMPDIR/fzf.args"
     export PFZF_FZF_INPUT="$BATS_TEST_TMPDIR/fzf.input"
+    export PFZF_FZF_PGID="$BATS_TEST_TMPDIR/fzf.pgid"
+    export PFZF_TIMERS="$BATS_TEST_TMPDIR/timers"
     export PFZF_SELECT=""
     : > "$PFZF_SENTINEL"
     : > "$PFZF_GPG_LOG"
@@ -76,6 +81,33 @@ pfzf_run() {
 
 pfzf_expected_candidates() {
     printf '%s\n' corrupt 'dir/with space' emptypw indented indenturi mention meta plain totp urionly
+}
+
+# Waits until <n> clear timers have started.
+pfzf_wait_timers() {
+    local i
+    for i in $(seq 50); do
+        [ "$({ wc -l < "$PFZF_TIMERS"; } 2>/dev/null || echo 0)" -ge "$1" ] && return 0
+        /bin/sleep 0.1
+    done
+    echo "expected $1 clear timer(s)"; return 1
+}
+
+# Ends the live clear timers the way pass does, so pass restores the
+# clipboard, and waits for the restore.
+pfzf_expire_timers() {
+    local pid i
+    for pid in $(pgrep x); do
+        kill "$pid"
+        for i in $(seq 50); do kill -0 "$pid" 2>/dev/null || break; /bin/sleep 0.1; done
+    done
+    /bin/sleep 0.3
+}
+
+# Gives this test its own copy of the store to add odd entries to.
+pfzf_private_store() {
+    cp -R "$PASSWORD_STORE_DIR" "$BATS_TEST_TMPDIR/store"
+    export PASSWORD_STORE_DIR="$BATS_TEST_TMPDIR/store"
 }
 
 pfzf_clipboard() {

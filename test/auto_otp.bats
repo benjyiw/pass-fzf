@@ -7,10 +7,17 @@ teardown_file() { pfzf_teardown_file; }
 setup() { pfzf_setup; pfzf_install_otp; }
 teardown() { pfzf_teardown; }
 
+# Like `run expect ...`, but output goes to a file: the clear timer outlives
+# the command and inherits expect's stdout, so a pipe would never close.
+pfzf_run_expect() {
+    status=0
+    expect "$@" > "$BATS_TEST_TMPDIR/expect.out" 2>&1 3>&- || status=$?
+    output="$(tr -d '\r' < "$BATS_TEST_TMPDIR/expect.out")"
+}
+
 pfzf_expect() {
     local keys="$1"; shift
-    run expect "$PFZF_REPO/test/expect/prompt.exp" "$keys" pass fzf "$@"
-    output="${output//$'\r'/}"
+    pfzf_run_expect "$PFZF_REPO/test/expect/prompt.exp" "$keys" pass fzf "$@"
 }
 
 @test "Enter copies the OTP code" {
@@ -142,11 +149,35 @@ pfzf_expect() {
 @test "Ctrl-C at the prompt restores the terminal settings" {
     export PFZF_SELECT=totp
     # perl's system() ignores SIGINT, so it survives to report the tty state.
-    run expect "$PFZF_REPO/test/expect/prompt.exp" '\003' \
+    pfzf_run_expect "$PFZF_REPO/test/expect/prompt.exp" '\003' \
         perl -e 'system @ARGV; exec "stty", "-a"' -- pass fzf -i
-    output="${output//$'\r'/}"
     [[ "$output" == *"lflags:"* ]] || false
     [[ "$output" != *"-icanon"* ]] || false
     [[ ! "$output" =~ (^|[[:space:]])-echo([[:space:]]|$) ]] || false
     [ "$(pfzf_clipboard)" = "totp-pw" ]
+}
+
+@test "after y, the original clipboard comes back when the OTP clears" {
+    export PFZF_SELECT=totp
+    printf 'original' > "$PFZF_CLIPBOARD"
+    pfzf_expect 'y' -i
+    [ "$status" -eq 0 ]
+    [[ "$(pfzf_clipboard)" =~ ^[0-9]{6}$ ]] || false
+    pfzf_expire_timers
+    [ "$(pfzf_clipboard)" = "original" ]
+}
+
+@test "the clear timer survives the terminal closing at the prompt" {
+    export PFZF_SELECT=totp
+    pfzf_run_expect -c '
+        set timeout 15
+        spawn -noecho pass fzf -i
+        expect "Copy OTP code? (Y/n) "
+        close
+        wait
+    '
+    pfzf_wait_timers 1
+    local pid; pid="$(cut -d' ' -f1 "$PFZF_TIMERS")"
+    /bin/sleep 0.5
+    kill -0 "$pid"
 }

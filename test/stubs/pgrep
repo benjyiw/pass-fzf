@@ -1,0 +1,9 @@
+#!/bin/sh
+# Lists only this test's live clear-timer stubs, so the user's own timers
+# are never found.
+found=1
+[ -f "$PFZF_TIMERS" ] || exit 1
+while read -r pid pgid; do
+    kill -0 "$pid" 2>/dev/null && { echo "$pid"; found=0; }
+done < "$PFZF_TIMERS"
+exit $found

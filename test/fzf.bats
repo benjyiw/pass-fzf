@@ -258,3 +258,89 @@ teardown() { pfzf_teardown; }
     [ "$(LC_ALL=C sort "$PFZF_FZF_INPUT")" = "$(pfzf_expected_candidates)" ]
     [ "$(pfzf_clipboard)" = "nested-pw" ]
 }
+
+@test "the clipboard clear timer gets its own process group" {
+    export PFZF_SELECT=meta
+    pfzf_run pass fzf
+    [ "$status" -eq 0 ]
+    pfzf_wait_timers 1
+    [ "$(cut -d' ' -f2 "$PFZF_TIMERS")" != "$(cat "$PFZF_FZF_PGID")" ]
+}
+
+@test "the OTP clear timer gets its own process group" {
+    pfzf_install_otp
+    export PFZF_SELECT=totp
+    pfzf_run pass fzf -o
+    [ "$status" -eq 0 ]
+    pfzf_wait_timers 1
+    [ "$(cut -d' ' -f2 "$PFZF_TIMERS")" != "$(cat "$PFZF_FZF_PGID")" ]
+}
+
+@test "the original clipboard comes back after the password clears" {
+    export PFZF_SELECT=meta
+    printf 'original' > "$PFZF_CLIPBOARD"
+    pfzf_run pass fzf
+    [ "$(pfzf_clipboard)" = "meta-pw" ]
+    pfzf_wait_timers 1
+    pfzf_expire_timers
+    [ "$(pfzf_clipboard)" = "original" ]
+}
+
+@test "a sneaky selection outside the store is refused" {
+    export PFZF_SELECT="../outside/x"
+    mkdir -p "$PFZF_ROOT/outside"
+    cp "$PASSWORD_STORE_DIR/meta.gpg" "$PFZF_ROOT/outside/x.gpg"
+    pfzf_run pass fzf
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"sneaky path"* ]] || false
+    [ -z "$(pfzf_clipboard)" ]
+}
+
+@test "a folder name containing a newline can't smuggle a path out of the store" {
+    pfzf_private_store
+    mkdir -p "$PASSWORD_STORE_DIR/evil"$'\n'"../outside"
+    cp "$PASSWORD_STORE_DIR/meta.gpg" "$PASSWORD_STORE_DIR/evil"$'\n'"../outside/x.gpg"
+    export PFZF_SELECT=meta
+    pfzf_run pass fzf -s
+    [ "$(LC_ALL=C sort "$PFZF_FZF_INPUT")" = "$(pfzf_expected_candidates)" ]
+}
+
+@test "a multi-line selection is refused" {
+    export PFZF_SELECT=$'meta\nplain'
+    pfzf_run pass fzf
+    [ "$status" -eq 1 ]
+    [ "$output" = "Error: select a single entry." ]
+    [ -z "$(pfzf_clipboard)" ]
+}
+
+@test "-o works for an entry whose name starts with a dash" {
+    pfzf_install_otp
+    pfzf_private_store
+    cp "$PASSWORD_STORE_DIR/totp.gpg" "$PASSWORD_STORE_DIR/-c.gpg"
+    export PFZF_SELECT=-c
+    local code; code="$(oathtool --totp -b "$PFZF_TOTP_SECRET")"
+    pfzf_run pass fzf -o
+    [ "$status" -eq 0 ]
+    pfzf_assert_totp_on_clipboard "$code"
+}
+
+@test "-o works for an entry named like a pass-otp subcommand" {
+    pfzf_install_otp
+    pfzf_private_store
+    cp "$PASSWORD_STORE_DIR/totp.gpg" "$PASSWORD_STORE_DIR/uri.gpg"
+    export PFZF_SELECT=uri
+    local code; code="$(oathtool --totp -b "$PFZF_TOTP_SECRET")"
+    pfzf_run pass fzf -o
+    [ "$status" -eq 0 ]
+    [[ "$output" != *"otpauth://"* ]] || false
+    pfzf_assert_totp_on_clipboard "$code"
+}
+
+@test "-s prints an entry named -n" {
+    pfzf_private_store
+    cp "$PASSWORD_STORE_DIR/plain.gpg" "$PASSWORD_STORE_DIR/-n.gpg"
+    export PFZF_SELECT=-n
+    pfzf_run pass fzf -s
+    [ "$status" -eq 0 ]
+    [ "$output" = "-n" ]
+}

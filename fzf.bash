@@ -4,10 +4,12 @@
 # Sourced by pass, which provides $PREFIX, $GPG, $GPG_OPTS, clip and die.
 # shellcheck disable=SC2154
 
-# The trailing slash follows a symlinked store.
+# The trailing slash follows a symlinked store. Names containing a newline
+# can't be shown on one fzf line, and could smuggle in other paths.
 function candidates() {
     local root="${PREFIX%/}" file
-    find -L "$root/" -name '*.gpg' | while IFS= read -r file; do
+    find -L "$root/" -name '*.gpg' -print0 | while IFS= read -r -d '' file; do
+        case "$file" in *$'\n'*) continue ;; esac
         file="${file#"$root/"}"
         printf '%s\n' "${file%.gpg}"
     done
@@ -73,18 +75,49 @@ function summarize_entry() {
     printf '%s' "${content%%$'\n'*}"
 }
 
+# End any pending pass clear timer the way pass's clip does, but wait for
+# its restore to finish, so the next clip doesn't save our previous secret
+# as the clipboard to restore.
+function finish_clip_timers() {
+    local pid parent _
+    for pid in $(pgrep -f "^password store sleep for user $(id -u)"); do
+        parent=$(ps -o ppid= -p "$pid") || continue
+        parent=${parent// /}
+        kill "$pid" 2>/dev/null || continue
+        for _ in $(seq 50); do
+            kill -0 "$parent" 2>/dev/null || break
+            sleep 0.1
+        done
+    done
+}
+
+# Copy with pass's clip. Job control gives its clear timer its own process
+# group, so it survives the terminal closing or a job being stopped while
+# we still wait at the OTP prompt. With job control on, bash no longer
+# points the timer's stdin at /dev/null, so do it here.
+function copy_to_clipboard() {
+    finish_clip_timers
+    set -m
+    clip "$1" "$2" </dev/null
+    set +m
+}
+
 # `pass otp insert` stores the URI as line 1; never copy the seed.
 function copy_password() {
     [ -n "$1" ] || die "There is no password to put on the clipboard at line 1."
     is_otp_line "$1" &&
         die "Error: line 1 of $2 is an otpauth:// URI, not a password. Use -o to copy the OTP code."
-    clip "$1" "$2"
+    copy_to_clipboard "$1" "$2"
 }
 
+# pass-otp only generates the code; copying it ourselves keeps pass-otp's
+# timer (which would hold the whole entry) out of the picture.
 function copy_otp() {
+    local code
     "$0" otp --help >/dev/null 2>&1 ||
         die "Error: pass-otp extension is required for OTP support"
-    "$0" otp -c "$1"
+    code=$("$0" otp code -- "$1") || exit $?
+    copy_to_clipboard "$code" "OTP code for $1"
 }
 
 # y/Y/Enter: yes, n/N: no, other keys ignored. No terminal: no.
@@ -132,7 +165,9 @@ query="$*"
 
 res=$(candidate_selector_fzf "$query")
 [ -n "$res" ] || exit 1
-[ $select_only -ne 0 ] && echo "$res" && exit 0
+case "$res" in *$'\n'*) die "Error: select a single entry." ;; esac
+check_sneaky_paths "$res"
+[ $select_only -ne 0 ] && printf '%s\n' "$res" && exit 0
 
 if [ $show_all -ne 0 ] || [ $otp_only -eq 0 ]; then
     exec 5>&1
@@ -145,8 +180,10 @@ if [ $otp_only -ne 0 ]; then
     exit $?
 fi
 
+otp_found=${summary:0:1}
 copy_password "${summary#?}" "$res"
-if [ $auto_otp -ne 0 ] && [ "${summary:0:1}" = 1 ] && prompt_otp; then
+unset summary
+if [ $auto_otp -ne 0 ] && [ "$otp_found" = 1 ] && prompt_otp; then
     copy_otp "$res"
     exit $?
 fi

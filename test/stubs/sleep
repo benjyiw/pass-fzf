@@ -1,5 +1,12 @@
 #!/bin/sh
-# Replaces pass's clipboard-clear timer: wait for teardown, then kill the
-# parent so its clipboard restore can't fall through to the real pbcopy.
-while [ -e "$PFZF_SENTINEL" ]; do /bin/sleep 0.1; done
+# Stands in for pass's clipboard-clear timer when given the clip time;
+# anything else is a real sleep.
+[ "$1" = "$PASSWORD_STORE_CLIP_TIME" ] || exec /bin/sleep "$@"
+echo "$$ $(ps -o pgid= -p $$ | tr -d ' ')" >> "$PFZF_TIMERS"
+# Killed the way pass kills a timer: exit, so pass's restore runs.
+trap 'exit 0' TERM
+# Teardown (or 10 minutes): kill the parent so its restore can't reach the
+# real pbcopy.
+i=0
+while [ -e "$PFZF_SENTINEL" ] && [ $i -lt 6000 ]; do /bin/sleep 0.1; i=$((i + 1)); done
 kill -9 "$PPID" 2>/dev/null
